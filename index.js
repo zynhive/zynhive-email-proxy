@@ -39,7 +39,7 @@ app.post("/sendEmail", async (req, res) => {
     const FROM_EMAIL = process.env.FROM_EMAIL || "onboarding@resend.dev";
     const FROM_NAME  = process.env.FROM_NAME  || "ZynHive CRM";
     // FIX: Reply-To — frontend se aaya > Render env REPLY_TO > FROM_EMAIL
-    const REPLY_TO   = replyTo || process.env.REPLY_TO || FROM_EMAIL;
+    const REPLY_TO   = process.env.REPLY_TO ;
 
     if (!RESEND_KEY) {
       console.log("[DEV] Simulated → to:", to);
