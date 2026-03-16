@@ -1,7 +1,4 @@
 // ─── index.js ─────────────────────────────────────────────────────────────────
-// Email proxy server — deploy on Render.com (FREE)
-// Fixes CORS issue when sending emails from frontend
-
 const express = require("express");
 const app     = express();
 const PORT    = process.env.PORT || 3001;
@@ -31,27 +28,21 @@ app.post("/sendEmail", async (req, res) => {
   try {
     const { to, subject, body, replyTo } = req.body;
 
-    // Validation
     if (!to || !subject || !body) {
-      return res.status(400).json({
-        success: false,
-        error: "to, subject, body are required",
-      });
+      return res.status(400).json({ success: false, error: "to, subject, body required" });
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid email address: " + to,
-      });
+      return res.status(400).json({ success: false, error: "Invalid email: " + to });
     }
 
     const RESEND_KEY = process.env.RESEND_API_KEY;
     const FROM_EMAIL = process.env.FROM_EMAIL || "onboarding@resend.dev";
     const FROM_NAME  = process.env.FROM_NAME  || "ZynHive CRM";
+    // FIX: Reply-To — frontend se aaya > Render env REPLY_TO > FROM_EMAIL
+    const REPLY_TO   = replyTo || process.env.REPLY_TO || FROM_EMAIL;
 
-    // Dev mode — no Resend key
     if (!RESEND_KEY) {
-      console.log("[DEV] Simulated email → to:", to, "| subject:", subject);
+      console.log("[DEV] Simulated → to:", to);
       return res.json({ success: true, messageId: "dev_" + Date.now() });
     }
 
@@ -66,7 +57,7 @@ app.post("/sendEmail", async (req, res) => {
         to:       [to],
         subject:  subject,
         text:     body,
-        ...(replyTo ? { reply_to: replyTo } : {}),
+        reply_to: REPLY_TO,   // ← har email mein reply_to set hoga
       }),
     });
 
@@ -74,21 +65,15 @@ app.post("/sendEmail", async (req, res) => {
 
     if (!response.ok) {
       console.error("[Email] Resend error:", data);
-      return res.status(500).json({
-        success: false,
-        error: data?.message ?? "Resend send failed",
-      });
+      return res.status(500).json({ success: false, error: data?.message ?? "Send failed" });
     }
 
-    console.log("[Email] Sent ✓ | to:", to, "| id:", data.id);
+    console.log("[Email] Sent ✓ | to:", to, "| reply_to:", REPLY_TO, "| id:", data.id);
     return res.json({ success: true, messageId: data.id });
 
   } catch (err) {
-    console.error("[Email] Server error:", err);
-    return res.status(500).json({
-      success: false,
-      error: err?.message ?? "Internal server error",
-    });
+    console.error("[Email] Error:", err);
+    return res.status(500).json({ success: false, error: err?.message });
   }
 });
 
@@ -104,6 +89,7 @@ app.post("/sendBatchEmails", async (req, res) => {
     const RESEND_KEY = process.env.RESEND_API_KEY;
     const FROM_EMAIL = process.env.FROM_EMAIL || "onboarding@resend.dev";
     const FROM_NAME  = process.env.FROM_NAME  || "ZynHive CRM";
+    const REPLY_TO   = process.env.REPLY_TO   || FROM_EMAIL;
     const results    = [];
 
     for (const email of emails) {
@@ -120,34 +106,27 @@ app.post("/sendBatchEmails", async (req, res) => {
             "Authorization": "Bearer " + RESEND_KEY,
           },
           body: JSON.stringify({
-            from:    FROM_NAME + " <" + FROM_EMAIL + ">",
-            to:      [email.to],
-            subject: email.subject,
-            text:    email.body,
+            from:     FROM_NAME + " <" + FROM_EMAIL + ">",
+            to:       [email.to],
+            subject:  email.subject,
+            text:     email.body,
+            reply_to: email.replyTo || REPLY_TO,
           }),
         });
 
         const data = await r.json();
-        results.push({
-          to:        email.to,
-          success:   r.ok,
-          messageId: data.id,
-          error:     r.ok ? undefined : data?.message,
-        });
+        results.push({ to: email.to, success: r.ok, messageId: data.id, error: r.ok ? undefined : data?.message });
       } catch (e) {
         results.push({ to: email.to, success: false, error: e?.message });
       }
-
-      // Resend rate limit: max 2/sec on free tier
       await new Promise((r) => setTimeout(r, 500));
     }
 
     const sent = results.filter((r) => r.success).length;
-    console.log("[Batch] Sent " + sent + "/" + emails.length + " emails");
+    console.log("[Batch] Sent " + sent + "/" + emails.length);
     return res.json({ results, sent, total: emails.length });
 
   } catch (err) {
-    console.error("[Batch] Error:", err);
     return res.status(500).json({ success: false, error: err?.message });
   }
 });
@@ -155,6 +134,7 @@ app.post("/sendBatchEmails", async (req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log("✅ ZynHive Email Proxy running on port " + PORT);
-  console.log("   FROM_EMAIL:", process.env.FROM_EMAIL || "onboarding@resend.dev (default)");
-  console.log("   RESEND_KEY:", process.env.RESEND_API_KEY ? "✓ set" : "✗ missing (dev mode)");
+  console.log("   FROM_EMAIL:", process.env.FROM_EMAIL || "onboarding@resend.dev");
+  console.log("   REPLY_TO:  ", process.env.REPLY_TO   || "not set — using FROM_EMAIL");
+  console.log("   RESEND_KEY:", process.env.RESEND_API_KEY ? "✓ set" : "✗ missing");
 });
